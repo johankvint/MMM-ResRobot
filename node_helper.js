@@ -41,10 +41,13 @@ module.exports = NodeHelper.create({
 
 		// Save all all departures that are still current (Departure time being after cutoff time)
 		var currentDepartures = [];
-		for (d in this.departures) {
-			var departureTime = moment(this.departures[d].timestamp);
+		this.departures = this.departures || [];
+
+		for (var departure of this.departures) {
+			var departureTime = moment(departure.timestamp);
+
 			if (departureTime.isAfter(cutoff)) {
-				currentDepartures.push(this.departures[d]);
+				currentDepartures.push(departure);
 			}
 		}
 
@@ -59,22 +62,17 @@ module.exports = NodeHelper.create({
 			// Clear departure list
 			this.departures = [];
 			// Process each route (from and to pair)
-			for (d in this.config.routes) {
+			for (var route of this.config.routes) {
 				// Get current list of departures between from and to
-				var url = this.getURL() + "&id=" + this.config.routes[d].from;
-				if (typeof this.config.routes[d].to === "string" && this.config.routes[d].to !== "") {
-					url += "&direction=" + this.config.routes[d].to;
-				}
+				var url = this.getURL() + "&originId=" + route.from + "&destId=" + route.to;
+
 				fetch(url)
-				.then(function(res) {
-					return res.json();
-				}).then(function(json) {
-					self.processDepartures(json);
-				})
-				.catch(function(err) {
-					console.log(self.name + " : " + err);
-					self.scheduleUpdate();
-				});
+					.then(r => r.json())
+					.then(json => self.processDepartures(json))
+					.catch(function(err) {
+						console.log(self.name + " : " + err);
+						self.scheduleUpdate();
+					});
 			}
 		}
 	},
@@ -90,8 +88,21 @@ module.exports = NodeHelper.create({
 //		if (this.config.maximumEntries !== "") {
 //			url += "&maxJourneys=" + this.config.maximumEntries;
 //		}
+
+		var productsCode = this.getProductsCode();
+		if(productsCode > 1 && productsCode < 511){
+			url += "&products=" + productsCode; 
+		}
+
 		return url;
 	},
+
+	getProductsCode: function(){
+		return this.config.transportTypes.reduce(function(acc, type){
+			var ttValue = this.config.transportTypesMap[type];
+			return ttValue ? acc + ttValue : acc;
+		}.bind(this), 0);
+	},	
 
 	/* processDepartures(data)
 	 * Uses the received data to set the various values.
@@ -99,14 +110,24 @@ module.exports = NodeHelper.create({
 	 * argument data object - Departure information received from ResRobot.
 	 */
 	processDepartures: function(data) {
-//		console.log("data: ", JSON.stringify(data));
+		// console.log("data: ", JSON.stringify(data));
 		var now = moment();
-		for (var i in data.Departure) {
-			var departure = data.Departure[i];
-			var departureTime = moment(departure.date + "T" + departure.time);
-			var waitingTime = moment.duration(departureTime.diff(now));
-			var departureTo = departure.direction;
-			var departureType = departure.Product.catOutS;
+		for (var trip of data.Trip) {
+			var leg = trip.LegList.Leg[0];
+
+			var departureTime = moment(leg.Origin.date + "T" + leg.Origin.time);
+			var arriveTime = moment(leg.Destination.date + "T" + leg.Destination.time);
+			var durationTime = ("" + arriveTime.diff(departureTime, "hours")).padStart(2, '0') + ":" + ("" + arriveTime.diff(departureTime, "minutes")).padStart(2, '0')
+			var departureTo = leg.Destination.name;
+
+			// Check if route has custom label
+			for (var route of this.config.routes) {
+				if (route.to == leg.Destination.id && route.label) {
+					departureTo = route.label;
+				}
+			}
+
+			var departureType = leg.transportCategory;
 			// If truncation is requested, truncate ending station at first word break after n characters
 			if (this.config.truncateAfter > 0) {
 				if (departureTo.indexOf(" ",this.config.truncateAfter) > 0)  {
@@ -117,11 +138,10 @@ module.exports = NodeHelper.create({
 				this.departures.push({
 					timestamp: departureTime,			// Departure timestamp, used for sorting
 					departuretime: departureTime.format("HH:mm"),	// Departure time in HH:mm, used for display
-					waitingtime: waitingTime.get("minutes"),	// Time until departure, in minutes
-					line: departure.transportNumber,		// Line number/name of departure
-					track: departure.rtTrack,				// Track number/name of departure
+					durationtime: durationTime,	// Duration for travel
+					line: leg.transportNumber,		// Line number/name of departure
 					type: departureType,				// Short category code for departure
-					to: departureTo					// Destination/Direction
+					to: departureTo,					// Destination/Direction
 				});
 			}
 		}

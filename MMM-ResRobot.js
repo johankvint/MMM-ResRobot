@@ -16,14 +16,35 @@ Module.register("MMM-ResRobot",{
 		animationSpeed: 2000,
 		fade: true,
 		fadePoint: 0.25,	// Start on 1/4th of the list.
-		apiBase: "https://api.resrobot.se/v2/departureBoard?format=json&passlist=0",
+		apiBase: "https://api.resrobot.se/v2/trip?format=json&passlist=0",
 		apiKey: "<YOUR RESROBOT API KEY HERE>",
 		routes: [
-			{from: "740020749", to: ""},	// Each route has a starting station ID from ResRobot, default: Stockholm Central Station (Metro)
+			{from: "740020749", to: "740020749", label: ""},	// Each route has a starting station ID from ResRobot, default: Stockholm Central Station (Metro)
 		],					// and a destination station ID from ResRobot, default: none
 		skipMinutes: 0,		// Number of minutes to skip before showing departures
 		maximumEntries: 6,	// Maximum Entries to show on screen
-		truncateAfter: 5,	// A value > 0 will truncate direction name at first space after <value> characters. Default: 5
+		truncateAfter: 0,	// A value > 0 will truncate direction name at first space after <value> characters. Default: 5
+		transportTypesMap: {
+			"express-train": 2,
+			"regional-train": 4,
+			"express-bus": 8,
+			"commuter-train": 16,
+			"subway": 32,
+			"tram": 64,
+			"bus": 128,
+			"ferry": 256
+			},
+		//Defaults to all available
+		transportTypes: [
+			"express-train",
+			"regional-train",
+			"express-bus",
+			"commuter-train",
+			"subway",
+			"tram",
+			"bus",
+			"ferry"
+		],
 		iconTable: {
 			"B": "fa fa-bus",
 			"S": "fa fa-subway",
@@ -60,7 +81,7 @@ Module.register("MMM-ResRobot",{
 		if (notification === "DEPARTURES") {
 			this.departures = payload;
 			this.loaded = true;
-			this.scheduleUpdate(0);
+			this.updateDom();
 		}
 	},
 
@@ -80,20 +101,23 @@ Module.register("MMM-ResRobot",{
 			return wrapper;
 		}
 
+		wrapper.className = "ResRobot";
+
 		var table = document.createElement("table");
 		table.className = "small";
 
 		var cutoff = moment().add(moment.duration(this.config.skipMinutes, "minutes"));
-		var n = 0;
-		for (var d in this.departures) {
-			if (n >= this.config.maximumEntries) {
+
+		for (var i = 0; i < this.departures.length; i++) {
+			var departure = this.departures[i];
+
+			if (i > this.config.maximumEntries) {
 				break;
 			}
-			var departure = this.departures[d];
+			
 			if (moment(departure.timestamp).isBefore(cutoff)) {
 				continue;
 			}
-			n++;
 
 			var row = document.createElement("tr");
 			table.appendChild(row);
@@ -116,8 +140,8 @@ Module.register("MMM-ResRobot",{
 			row.appendChild(depLineCell);
 
 			var depLineCell = document.createElement("td");
-			depLineCell.className = "trackno";
-			depLineCell.innerHTML = departure.track;
+			depLineCell.className = "duration";
+			depLineCell.innerHTML = departure.durationtime;
 			row.appendChild(depLineCell);
 
 			var depToCell = document.createElement("td");
@@ -130,31 +154,16 @@ Module.register("MMM-ResRobot",{
  					this.config.fadePoint = 0;
 				}
 				var startingPoint = this.config.maximumEntries * this.config.fadePoint;
-				var steps = this.departures.length - startingPoint;
-				if (d >= startingPoint) {
-					var currentStep = d - startingPoint;
+				var steps = Math.min(this.departures.length, this.config.maximumEntries) - startingPoint;
+				if (i >= startingPoint) {
+					var currentStep = i - startingPoint;
 					row.style.opacity = 1 - (1 / steps * currentStep);
 				}
 			}
 
 		}
-		return table;
-	},
-	/* scheduleUpdate()
-	 * Schedule next update.
-	 *
-	 * argument delay number - Milliseconds before next update. If empty, 30 seconds is used.
-	 */
-	scheduleUpdate: function(delay) {
-		var nextLoad = 30000;
-		if (typeof delay !== "undefined" && delay >= 0) {
-			nextLoad = delay;
-		}
-
-		var self = this;
-		clearTimeout(this.updateTimer);
-		this.updateTimer = setInterval(function() {
-			self.updateDom();
-		}, nextLoad);
+		
+		wrapper.appendChild(table);
+		return wrapper;
 	},
 });
